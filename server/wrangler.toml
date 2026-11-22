@@ -1,0 +1,24 @@
+name = "paws-and-paychecks-api"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+SIGNING_SECRET = "dev-secret-change-in-prod"
+DEMO_MODE      = "false"   # set to "true" for the class-exchange demo
+
+[[durable_objects.bindings]]
+name = "RUN"
+class_name = "RunObject"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RunObject"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "paws-db"
+database_id = "placeholder-replace-after-wrangler-d1-create"
+# To set up: wrangler d1 create paws-db  → paste the id above
+# Then run:  wrangler d1 execute paws-db --file=server/migrations/0001_init.sql
+# Local dev works without this — scoring still works, leaderboard returns []

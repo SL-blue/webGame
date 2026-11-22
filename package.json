@@ -1,0 +1,16 @@
+{
+  "name": "paws-and-paychecks",
+  "private": true,
+  "workspaces": ["shared", "client", "server"],
+  "scripts": {
+    "dev": "npm run dev -w client",
+    "test": "npx vitest run",
+    "build": "npm run build -w client",
+    "deploy": "npm run deploy -w server"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

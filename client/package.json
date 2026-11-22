@@ -1,0 +1,20 @@
+{
+  "name": "client",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "echo 'client has no unit tests'"
+  },
+  "dependencies": {
+    "shared": "*",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.0"
+  }
+}
