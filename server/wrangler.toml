@@ -23,7 +23,7 @@ new_sqlite_classes = ["RunObject"]
 [[d1_databases]]
 binding = "DB"
 database_name = "paws-db"
-database_id = "placeholder-replace-after-wrangler-d1-create"
+database_id = "5375f814-5bc7-4cf2-8fcc-a6550cf0858c"
 # To set up D1 (run from /server):
 #   npx wrangler d1 create paws-db  → paste the returned id above
 #   npx wrangler d1 execute paws-db --remote --file=migrations/0001_init.sql
