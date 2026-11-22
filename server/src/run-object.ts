@@ -7,6 +7,7 @@ import { generateSegmentSpec, payForTask, taskOffers } from "./rules/segments";
 import { validateSegmentResults, scoreSegment } from "./validate";
 import { applySleep } from "./rules/sleep";
 import { addPerk, offerPerks, has } from "./rules/perks";
+import { checkAccidentTiming } from "./rules/accident";
 import { computeAreaScores, computeFinalScore, gradeArea, generateReasons } from "./rules/scoring";
 
 type PendingAccident = { spec: AccidentSpec; responded: boolean };
@@ -44,25 +45,33 @@ export class RunObject implements DurableObject {
   constructor(private ctx: DurableObjectState) {}
 
   async fetch(request: Request): Promise<Response> {
+    // Restore state if the DO was evicted since the last request
+    this.state ??= (await this.ctx.storage.get<RunState>("state")) ?? null;
+
     const url = new URL(request.url);
     const body: unknown = await request.json().catch(() => ({}));
 
+    let response: Response;
     switch (url.pathname) {
-      case "/init":     return this.init(body as { runId: string });
-      case "/schedule": return this.schedule(body as { taskId: string });
-      case "/segment":  return this.submitSegment(body as SegmentResultPayload);
-      case "/accident": return this.accident(body as { accidentId: string; response: string; t: number });
-      case "/evening":  return this.evening(body as { activities: string[] });
-      case "/sleep":    return this.sleep();
-      case "/perk":     return this.perk(body as { perkId: string });
-      case "/end":      return this.end();
-      default:          return new Response("Not Found", { status: 404 });
+      case "/init":     response = this.init(body as { runId: string; demo?: boolean }); break;
+      case "/schedule": response = this.schedule(body as { taskId: string }); break;
+      case "/segment":  response = this.submitSegment(body as SegmentResultPayload); break;
+      case "/accident": response = this.accident(body as { accidentId: string; response: string; t: number }); break;
+      case "/evening":  response = this.evening(body as { activities: string[] }); break;
+      case "/sleep":    response = this.sleep(); break;
+      case "/perk":     response = this.perk(body as { perkId: string }); break;
+      case "/end":      response = this.end(); break;
+      default:          response = new Response("Not Found", { status: 404 });
     }
+
+    // Persist after every mutating request so state survives eviction and redeployment
+    if (this.state) await this.ctx.storage.put("state", this.state);
+    return response;
   }
 
   // ─── init ───────────────────────────────────────────────────────────────────
 
-  private init(body: { runId: string; demo?: boolean }): Response {
+  private init(body: { runId: string; demo?: boolean } ): Response {
     const seed = Math.floor(Math.random() * 2 ** 32);
     const rng  = mulberry32(seed);
     const traits = assignTraits(rng);
@@ -193,11 +202,20 @@ export class RunObject implements DurableObject {
     const pa = this.state.pendingAccidents.find((a) => a.spec.id === body.accidentId);
     if (!pa) return this.err("Unknown accident id");
     if (pa.responded) return this.err("Accident already responded");
-    pa.responded = true;
 
-    if (body.response === "ignored" || body.t > pa.spec.windowMs + 500) {
-      this.applyAccidentCost(pa.spec.type);
-    }
+    const outcome = checkAccidentTiming(
+      this.state.phaseStartedAt,
+      pa.spec.warningAt,
+      pa.spec.windowMs,
+      body.response,
+      Date.now(),
+    );
+
+    if (outcome === "not-active") return this.err("Accident not active yet");
+
+    pa.responded = true;
+    if (outcome === "cost") this.applyAccidentCost(pa.spec.type);
+
     return Response.json({ cues: buildCues(this.state.hidden), money: this.state.money });
   }
 

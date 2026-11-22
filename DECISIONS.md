@@ -11,3 +11,8 @@
 - esbuild.pure strips console.log/info/warn from production bundle — keeps console.error for real runtime errors
 - Multiplicative scoring (not additive) — neglecting any single area tanks total score, enforces balanced play
 - D1 save is best-effort (try/catch) — leaderboard degrades gracefully in local dev without wrangler d1 create
+- SQLite-backed Durable Object (`new_sqlite_classes`) — required on the Workers Free plan; regular `new_classes` only works on paid plans
+- Run state persisted to DO storage after each request — survives eviction and redeploys; only `fetch()` is async, all handlers remain synchronous
+- SIGNING_SECRET moved to a Wrangler secret / .dev.vars — was public in the repo commit history; .dev.vars added to .gitignore
+- Accident timing checked by the server clock, not the client's `t` — the client's self-reported `t` could be faked; pure `checkAccidentTiming()` function makes this testable
+- Client served via Worker static assets (`[assets]`) — one deploy, same origin for /api, no CORS config needed

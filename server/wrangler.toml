@@ -4,8 +4,13 @@ compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
-SIGNING_SECRET = "dev-secret-change-in-prod"
-DEMO_MODE      = "false"   # set to "true" for the class-exchange demo
+DEMO_MODE = "false"   # set to "true" for the class-exchange demo
+# SIGNING_SECRET is a Wrangler secret, not a var — set it with:
+#   npx wrangler secret put SIGNING_SECRET
+# For local dev, copy server/.dev.vars.example to server/.dev.vars
+
+[assets]
+directory = "../client/dist"
 
 [[durable_objects.bindings]]
 name = "RUN"
@@ -13,12 +18,13 @@ class_name = "RunObject"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["RunObject"]
+new_sqlite_classes = ["RunObject"]
 
 [[d1_databases]]
 binding = "DB"
 database_name = "paws-db"
 database_id = "placeholder-replace-after-wrangler-d1-create"
-# To set up: wrangler d1 create paws-db  → paste the id above
-# Then run:  wrangler d1 execute paws-db --file=server/migrations/0001_init.sql
+# To set up D1 (run from /server):
+#   npx wrangler d1 create paws-db  → paste the returned id above
+#   npx wrangler d1 execute paws-db --remote --file=migrations/0001_init.sql
 # Local dev works without this — scoring still works, leaderboard returns []
