@@ -13,11 +13,15 @@ export function validateSegmentResults(
 ): ValidationResult {
   const specItemIds = new Set(spec.items.map((i) => i.id));
 
+  // catch-delivery uses position-based catches (reactionMs: 0 is valid); only
+  // keystroke-based games need reaction-time and uniformity checks.
+  const keystrokeBased = spec.taskType !== "catch-delivery";
+
   for (const r of payload.items) {
     if (r.action !== "miss" && r.action !== "missed" && !specItemIds.has(r.itemId)) {
       return { ok: false, reason: `Unknown item id: ${r.itemId}` };
     }
-    if (r.action !== "miss" && r.action !== "missed" && r.reactionMs < MIN_REACTION_MS) {
+    if (keystrokeBased && r.action !== "miss" && r.action !== "missed" && r.reactionMs < MIN_REACTION_MS) {
       return { ok: false, reason: `Reaction too fast: ${r.reactionMs}ms` };
     }
     if (r.accuracy !== undefined && (r.accuracy < 0 || r.accuracy > 1)) {
@@ -34,12 +38,14 @@ export function validateSegmentResults(
     return { ok: false, reason: "Segment submitted too early by server clock" };
   }
 
-  // Soft-flag suspiciously uniform timing (bot-like behaviour)
-  const times = payload.items
-    .filter((r) => r.action !== "miss" && r.action !== "missed")
-    .map((r) => r.reactionMs);
-  if (times.length >= 3 && hasUniformTiming(times)) {
-    return { ok: false, reason: "Suspiciously uniform reaction timing" };
+  // Uniformity check only for keystroke-based games
+  if (keystrokeBased) {
+    const times = payload.items
+      .filter((r) => r.action !== "miss" && r.action !== "missed")
+      .map((r) => r.reactionMs);
+    if (times.length >= 3 && hasUniformTiming(times)) {
+      return { ok: false, reason: "Suspiciously uniform reaction timing" };
+    }
   }
 
   return { ok: true };
@@ -57,9 +63,9 @@ export function scoreSegment(
   payPerBox: number,
 ): { sorted: number; missed: number; pay: number } {
   switch (spec.taskType) {
-    case "package-sort": return scorePackageSort(spec, payload, payPerBox);
-    case "coffee-timing": return scoreCoffeeTiming(spec, payload, payPerBox);
-    case "catch-delivery": return scoreCatchDelivery(spec, payload, payPerBox);
+    case "package-sort":    return scorePackageSort(spec, payload, payPerBox);
+    case "coffee-timing":   return scoreCoffeeTiming(spec, payload, payPerBox);
+    case "catch-delivery":  return scoreCatchDelivery(spec, payload, payPerBox);
   }
 }
 
@@ -90,7 +96,6 @@ function scoreCoffeeTiming(
     const acc = r.accuracy ?? 0;
     if (r.action === "hit" && acc >= 0) {
       sorted++;
-      // Accuracy bonus: 0.5 accuracy = full pay, edges = 50% pay
       pay += Math.floor(payPerBox * (0.5 + acc * 0.5));
     } else {
       missed++;
@@ -109,8 +114,7 @@ function scoreCatchDelivery(
     const r = payload.items.find((x) => x.itemId === item.id);
     const caught = r?.action === "caught";
     if (item.fragile) {
-      if (caught) { missed++; pay -= payPerBox; } // caught fragile: big penalty
-      // missed fragile: neutral (avoided)
+      if (caught) { missed++; pay -= payPerBox; }
     } else {
       if (caught) { sorted++; pay += payPerBox; }
       else { missed++; pay -= 2; }

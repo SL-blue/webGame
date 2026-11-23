@@ -52,6 +52,7 @@ export class StateMachine {
     this.pending = false;
     this.day = 1;
     this.money = 0;
+    this.removeErrorButton();
     this.startAsync().catch((e) => this.showError(String(e)));
   }
 
@@ -70,15 +71,18 @@ export class StateMachine {
 
   private async startAsync(): Promise<void> {
     this.pending = true;
-    const res = await api.startRun();
-    api.setSession(res.runId, res.token);
-    setDemoMode(res.demo);
-    this.taskOffers = res.taskOffers;
-    this.day = res.day;
-    this.money = 0;
-    this.applyCues(res.cues);
-    this.pending = false;
-    this.enterMorning();
+    try {
+      const res = await api.startRun();
+      api.setSession(res.runId, res.token);
+      setDemoMode(res.demo);
+      this.taskOffers = res.taskOffers;
+      this.day = res.day;
+      this.money = 0;
+      this.applyCues(res.cues);
+      this.enterMorning();
+    } finally {
+      this.pending = false;
+    }
   }
 
   // ─── phases ─────────────────────────────────────────────────────────────────
@@ -94,19 +98,21 @@ export class StateMachine {
 
   private async scheduleTask(taskId: string): Promise<void> {
     this.pending = true;
-    const res = await api.scheduleTask(taskId);
-    this.pending = false;
-
-    this.minigame?.dispose();
-    this.minigame = this.createMinigame(res.segment.taskType);
-    this.segmentAccidents = res.segment.accidents ?? [];
-    this.seenAccidentIds.clear();
-    this.workElapsed = 0;
-    this.phase = "work";
-    this.scene.enterWorkMode();
-    this.updateHudLabel(`Day ${this.day} — Work`);
-    this.minigame.start(res.segment);
-    this.registerAccidentKey();
+    try {
+      const res = await api.scheduleTask(taskId);
+      this.minigame?.dispose();
+      this.minigame = this.createMinigame(res.segment.taskType);
+      this.segmentAccidents = res.segment.accidents ?? [];
+      this.seenAccidentIds.clear();
+      this.workElapsed = 0;
+      this.phase = "work";
+      this.scene.enterWorkMode();
+      this.updateHudLabel(`Day ${this.day} — Work`);
+      this.minigame.start(res.segment);
+      this.registerAccidentKey();
+    } finally {
+      this.pending = false;
+    }
   }
 
   private updateWork(dt: number): void {
@@ -124,7 +130,10 @@ export class StateMachine {
   private async endWork(): Promise<void> {
     if (this.phase !== "work") return;
     this.phase = "idle";
-    this.dismissActiveAccident("ignored");
+    // Clear any visible accident overlay without firing the API — submitSegment
+    // already charges for unresponded accidents server-side, so a racing
+    // "ignored" call arriving after the phase changes isn't needed.
+    this.clearActiveAccident();
     this.unregisterAccidentKey();
 
     const result = this.minigame!.getResults();
@@ -132,16 +141,18 @@ export class StateMachine {
     this.minigame = null;
 
     this.pending = true;
-    const res = await api.submitSegment(result);
-    this.pending = false;
-
-    this.lastEarned = res.money - this.money;
-    this.money = res.money;
-    this.lastSorted = res.sorted;
-    this.lastMissed = res.missed;
-    this.applyCues(res.cues);
-    this.updateMoneyLabel();
-    this.enterEvening();
+    try {
+      const res = await api.submitSegment(result);
+      this.lastEarned = res.money - this.money;
+      this.money = res.money;
+      this.lastSorted = res.sorted;
+      this.lastMissed = res.missed;
+      this.applyCues(res.cues);
+      this.updateMoneyLabel();
+      this.enterEvening();
+    } finally {
+      this.pending = false;
+    }
   }
 
   private enterEvening(): void {
@@ -155,12 +166,15 @@ export class StateMachine {
 
   private async submitEvening(activities: string[]): Promise<void> {
     this.pending = true;
-    const res = await api.submitEvening(activities);
-    this.pending = false;
-    this.money = res.money;
-    this.applyCues(res.cues);
-    this.updateMoneyLabel();
-    this.enterSleep();
+    try {
+      const res = await api.submitEvening(activities);
+      this.money = res.money;
+      this.applyCues(res.cues);
+      this.updateMoneyLabel();
+      this.enterSleep();
+    } finally {
+      this.pending = false;
+    }
   }
 
   private enterSleep(): void {
@@ -180,25 +194,27 @@ export class StateMachine {
 
   private async submitSleep(): Promise<void> {
     this.pending = true;
-    const res = await api.submitSleep();
-    this.pending = false;
+    try {
+      const res = await api.submitSleep();
+      this.lastFeedback = res.summary.feedback;
+      this.applyCues(res.cues);
+      this.updateRelationshipIndicator(res.cues);
 
-    this.lastFeedback = res.summary.feedback;
-    this.applyCues(res.cues);
-    this.updateRelationshipIndicator(res.cues);
+      if (res.nextDay === null) {
+        this.endRun();
+        return;
+      }
 
-    if (res.nextDay === null) {
-      this.endRun();
-      return;
-    }
+      this.day = res.nextDay;
+      this.lastSorted = this.lastMissed = this.lastEarned = 0;
 
-    this.day = res.nextDay;
-    this.lastSorted = this.lastMissed = this.lastEarned = 0;
-
-    if (res.perkOffer && res.perkOffer.length > 0) {
-      this.enterPerkPhase(res.perkOffer);
-    } else {
-      this.enterMorning();
+      if (res.perkOffer && res.perkOffer.length > 0) {
+        this.enterPerkPhase(res.perkOffer);
+      } else {
+        this.enterMorning();
+      }
+    } finally {
+      this.pending = false;
     }
   }
 
@@ -212,9 +228,12 @@ export class StateMachine {
 
   private async submitPerk(perkId: string): Promise<void> {
     this.pending = true;
-    await api.choosePerk(perkId);
-    this.pending = false;
-    this.enterMorning();
+    try {
+      await api.choosePerk(perkId);
+      this.enterMorning();
+    } finally {
+      this.pending = false;
+    }
   }
 
   private endRun(): void {
@@ -224,36 +243,36 @@ export class StateMachine {
 
   private async endRunAsync(): Promise<void> {
     this.pending = true;
-    const res = await api.endRun();
-    this.pending = false;
+    try {
+      const res = await api.endRun();
 
-    document.getElementById("hud")!.style.display = "none";
+      document.getElementById("hud")!.style.display = "none";
 
-    // Score
-    const scoreEl = document.getElementById("end-score");
-    if (scoreEl) scoreEl.textContent = res.score.toLocaleString();
+      const scoreEl = document.getElementById("end-score");
+      if (scoreEl) scoreEl.textContent = res.score.toLocaleString();
 
-    // Grade tiles
-    const gradesEl = document.getElementById("end-grades");
-    if (gradesEl) {
-      const areas = [
-        { label: "Finances",     grade: res.grades.finances     },
-        { label: "Pet",          grade: res.grades.pet          },
-        { label: "Self",         grade: res.grades.self         },
-        { label: "Relationship", grade: res.grades.relationship },
-      ];
-      gradesEl.innerHTML = areas
-        .map((a) => `<div class="grade-tile grade-${a.grade.toLowerCase()}">${a.label}<span>${a.grade}</span></div>`)
-        .join("");
+      const gradesEl = document.getElementById("end-grades");
+      if (gradesEl) {
+        const areas = [
+          { label: "Finances",     grade: res.grades.finances     },
+          { label: "Pet",          grade: res.grades.pet          },
+          { label: "Self",         grade: res.grades.self         },
+          { label: "Relationship", grade: res.grades.relationship },
+        ];
+        gradesEl.innerHTML = areas
+          .map((a) => `<div class="grade-tile grade-${a.grade.toLowerCase()}">${a.label}<span>${a.grade}</span></div>`)
+          .join("");
+      }
+
+      const reasonsEl = document.getElementById("end-reasons");
+      if (reasonsEl) {
+        reasonsEl.innerHTML = res.reasons.map((r) => `<p>${r}</p>`).join("");
+      }
+
+      document.getElementById("end-screen")!.style.display = "flex";
+    } finally {
+      this.pending = false;
     }
-
-    // Reasons
-    const reasonsEl = document.getElementById("end-reasons");
-    if (reasonsEl) {
-      reasonsEl.innerHTML = res.reasons.map((r) => `<p>${r}</p>`).join("");
-    }
-
-    document.getElementById("end-screen")!.style.display = "flex";
   }
 
   // ─── accident system ─────────────────────────────────────────────────────────
@@ -298,7 +317,8 @@ export class StateMachine {
     const bar = document.getElementById("accident-timer-bar");
     if (bar) bar.style.width = `${Math.max(0, frac) * 100}%`;
     if (this.accidentElapsed * 1000 >= this.activeAccident.windowMs) {
-      this.dismissActiveAccident("ignored");
+      // Timer expired during play — tell the server so it can apply the cost
+      this.dismissActiveAccident();
     }
   }
 
@@ -313,15 +333,20 @@ export class StateMachine {
       .catch((e) => this.showError(String(e)));
   }
 
-  private dismissActiveAccident(response: "answered" | "ignored"): void {
+  /** Called when the player lets the timer run out during active play. */
+  private dismissActiveAccident(): void {
     if (!this.activeAccident) return;
     const acc = this.activeAccident;
     const t = this.accidentElapsed * 1000;
     this.activeAccident = null;
     this.hideAccidentOverlay();
-    if (response === "ignored") {
-      api.reportAccident(acc.id, "ignored", t).catch(() => { /* best effort */ });
-    }
+    api.reportAccident(acc.id, "ignored", t).catch(() => { /* best effort */ });
+  }
+
+  /** Called when work ends — just clears the UI; submitSegment handles costs. */
+  private clearActiveAccident(): void {
+    this.activeAccident = null;
+    this.hideAccidentOverlay();
   }
 
   private hideAccidentOverlay(): void {
@@ -369,7 +394,25 @@ export class StateMachine {
 
   private showError(msg: string): void {
     console.error("[StateMachine]", msg);
+    this.pending = false; // ensure the game loop isn't permanently frozen
     const el = document.getElementById("phase-label");
     if (el) el.textContent = `Error: ${msg}`;
+
+    // Show a restart button so the player is never stuck
+    this.removeErrorButton();
+    const btn = document.createElement("button");
+    btn.id = "error-restart-btn";
+    btn.textContent = "Restart run";
+    btn.style.cssText = [
+      "position:fixed", "bottom:28px", "left:50%", "transform:translateX(-50%)",
+      "z-index:9999", "padding:0.65rem 2rem", "font-size:1rem", "font-weight:600",
+      "background:#e07b4f", "border:none", "border-radius:8px", "color:#fff", "cursor:pointer",
+    ].join(";");
+    btn.addEventListener("click", () => this.start());
+    document.body.appendChild(btn);
+  }
+
+  private removeErrorButton(): void {
+    document.getElementById("error-restart-btn")?.remove();
   }
 }

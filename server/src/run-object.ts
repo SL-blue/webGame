@@ -155,26 +155,24 @@ export class RunObject implements DurableObject {
     const serverElapsedMs = Date.now() - this.state.phaseStartedAt;
     const validation = validateSegmentResults(spec, payload, serverElapsedMs);
 
+    // Score the segment; on validation failure use 0 pay but always advance phase.
+    // A failed check must never leave the run stuck in "work" (TECH_SPEC §7).
+    let sorted = 0, missed = spec.items.length, pay = 0;
     if (!validation.ok) {
       this.state.log.push(`validation-fail: ${validation.reason}`);
-      return Response.json({
-        cues: buildCues(this.state.hidden), money: this.state.money,
-        nextSegment: null, sorted: 0, missed: spec.items.length,
-      });
+    } else {
+      ({ sorted, missed, pay } = scoreSegment(spec, payload, this.state.currentPayPerBox));
+      this.state.money += pay;
+      this.state.daySorted += sorted;
+      this.state.dayMissed += missed;
+      this.state.dayEarned += pay;
     }
 
-    const { sorted, missed, pay } = scoreSegment(spec, payload, this.state.currentPayPerBox);
-    this.state.money += pay;
-    this.state.daySorted += sorted;
-    this.state.dayMissed += missed;
-    this.state.dayEarned += pay;
-
-    // Apply costs for any unresponded accidents
+    // Always charge unresponded accidents and apply work effects
     for (const pa of this.state.pendingAccidents) {
       if (!pa.responded) this.applyAccidentCost(pa.spec.type);
     }
 
-    // Work effects on hidden state
     const workStress = has(this.state.perks, "workaholic") ? 20 : 15;
     this.state.hidden.stress  = Math.min(100, this.state.hidden.stress + workStress);
     this.state.hidden.fatigue = Math.min(100, this.state.hidden.fatigue + 20);
@@ -183,6 +181,7 @@ export class RunObject implements DurableObject {
       0, this.state.hidden.pet.mood - (this.state.hidden.pet.traits.includes("clingy") ? 20 : 10),
     );
 
+    // Always advance — a stuck work phase is worse than giving 0 pay
     this.state.phase = "evening";
     this.state.phaseStartedAt = Date.now();
     this.state.currentSegmentSpec = null;

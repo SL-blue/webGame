@@ -173,6 +173,39 @@ describe("validateSegmentResults — uniform timing (anti-bot)", () => {
   });
 });
 
+// ─── catch-delivery: reactionMs 0 must pass ──────────────────────────────────
+
+describe("validateSegmentResults — catch-delivery", () => {
+  it("accepts reactionMs: 0 (position-based catch, no keystroke timing)", () => {
+    const p: SegmentResultPayload = {
+      segmentId: "seg-catch",
+      items: CATCH_SPEC.items.map((item) => ({
+        itemId: item.id,
+        action: "caught",
+        reactionMs: 0,
+      })),
+    };
+    expect(validateSegmentResults(CATCH_SPEC, p, ELAPSED_OK)).toEqual({ ok: true });
+  });
+
+  it("still rejects unknown item ids for catch-delivery", () => {
+    const p: SegmentResultPayload = {
+      segmentId: "seg-catch",
+      items: [{ itemId: "pkg-999", action: "caught", reactionMs: 0 }],
+    };
+    expect(validateSegmentResults(CATCH_SPEC, p, ELAPSED_OK).ok).toBe(false);
+  });
+
+  it("does NOT flag uniform reactionMs: 0 as bot timing for catch-delivery", () => {
+    // All reactionMs are 0 — identical, but that's expected for position-based catches
+    const p: SegmentResultPayload = {
+      segmentId: "seg-catch",
+      items: CATCH_SPEC.items.map((item) => ({ itemId: item.id, action: "caught", reactionMs: 0 })),
+    };
+    expect(validateSegmentResults(CATCH_SPEC, p, ELAPSED_OK)).toEqual({ ok: true });
+  });
+});
+
 // ─── Balance smoke test ───────────────────────────────────────────────────────
 
 describe("balance — all accidents ignored vs responded", () => {
